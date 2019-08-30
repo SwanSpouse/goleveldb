@@ -30,9 +30,9 @@ import (
 var (
 	dbPath                 = path.Join(os.TempDir(), "goleveldb-testdb")
 	openFilesCacheCapacity = 500
-	keyLen                 = 63
-	valueLen               = 256
-	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
+	keyLen                 = 63                                                   // 测试key的长度
+	valueLen               = 256                                                  // 测试value的长度
+	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743} // 测试的key数量
 	httpProf               = "127.0.0.1:5454"
 	transactionProb        = 0.5
 	enableBlockCache       = false
@@ -74,6 +74,7 @@ func (a *arrayInt) Set(str string) error {
 	return nil
 }
 
+// 加载配置项
 func init() {
 	flag.StringVar(&dbPath, "db", dbPath, "testdb path")
 	flag.IntVar(&openFilesCacheCapacity, "openfilescachecap", openFilesCacheCapacity, "open files cache capacity")
@@ -87,6 +88,7 @@ func init() {
 	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
 }
 
+// 产生随机数据
 func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
 	if dataLen < (2+4+4)*2+4 {
 		panic("dataLen is too small")
@@ -133,8 +135,11 @@ func dataI(data []byte) uint32 {
 	return binary.LittleEndian.Uint32(data[(len(data)-4)/2-8:])
 }
 
+// 计算校验和
 func dataChecksum(data []byte) (uint32, uint32) {
+	// 这个是从数据里面读出的校验和
 	checksum0 := binary.LittleEndian.Uint32(data[len(data)-4:])
+	// 这个是根据数据里面计算出来的校验和
 	checksum1 := util.NewCRC(data[:len(data)-4]).Value()
 	return checksum0, checksum1
 }
@@ -165,7 +170,7 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 
 	o := &opt.Options{
 		DisableLargeBatchTransaction: true,
-		Strict: opt.NoStrict,
+		Strict:                       opt.NoStrict,
 	}
 	if checksum {
 		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
@@ -307,21 +312,28 @@ func main() {
 	log.Printf("Test DB stored at %q", dbPath)
 	if httpProf != "" {
 		log.Printf("HTTP pprof listening at %q", httpProf)
+		/*
+		debug的setBlockProfileRate方法设置go协程区块性能数据采集的速率， 单位：样本/秒。一个非零的值表示启动区块性能检测，零值表示停止区块 性能检测。采集的区块性能数据可以使用debug_writeBlockProfile方法写入文件。
+		 */
 		runtime.SetBlockProfileRate(1)
 		go func() {
+			// 这里是给HTTP Sever开了一个口子，通过用于debug/pprof路径来进行debug
 			if err := http.ListenAndServe(httpProf, nil); err != nil {
 				log.Fatalf("HTTPPROF: %v", err)
 			}
 		}()
 	}
 
+	// 设置并发数。其实不用写的话默认值也是这个。
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
+	// 清空目录
 	os.RemoveAll(dbPath)
+	// 创建目录
 	stor, err := storage.OpenFile(dbPath, false)
 	if err != nil {
 		log.Fatal(err)
 	}
+	// 创建一个测试数据库引擎
 	tstor := &testingStorage{stor}
 	defer tstor.Close()
 
@@ -344,6 +356,7 @@ func main() {
 	if openFilesCacheCapacity == 0 {
 		openFilesCacheCapacity = -1
 	}
+	// DB选项
 	o := &opt.Options{
 		OpenFilesCacheCapacity: openFilesCacheCapacity,
 		DisableBufferPool:      !enableBufferPool,
@@ -351,10 +364,11 @@ func main() {
 		ErrorIfExist:           true,
 		Compression:            opt.NoCompression,
 	}
+	// 启用压缩
 	if enableCompression {
 		o.Compression = opt.DefaultCompression
 	}
-
+	// 在这里创建DB
 	db, err := leveldb.Open(tstor, o)
 	if err != nil {
 		log.Fatal(err)
@@ -366,18 +380,20 @@ func main() {
 		gGetStat        = &latencyStats{}
 		gIterStat       = &latencyStats{}
 		gWriteStat      = &latencyStats{}
-		gTrasactionStat = &latencyStats{}
+		gTrasactionStat = &latencyStats{} // 这里有一个拼写错误
 		startTime       = time.Now()
 
-		writeReq    = make(chan *leveldb.Batch)
+		writeReq    = make(chan *leveldb.Batch) // 这些都是没有缓冲区的chan
 		writeAck    = make(chan error)
 		writeAckAck = make(chan struct{})
 	)
 
+	// 接收writeReq中的数据并写入DB中
 	go func() {
 		for b := range writeReq {
-
 			var err error
+			// 产生随机数，如果小于transactionProb，就用事务进行写入
+			// 所以这里测试的时候是一半正常写入，一半事务写入；
 			if mrand.Float64() < transactionProb {
 				log.Print("> Write using transaction")
 				gTrasactionStat.start()
@@ -397,27 +413,26 @@ func main() {
 					gWriteStat.record(b.Len())
 				}
 			}
+			// 写入ack
 			writeAck <- err
+			// 写入ack的ack TODO
 			<-writeAckAck
 		}
 	}()
 
 	go func() {
 		for {
+			// 每隔3s钟输出一次当前测试的统计信息
 			time.Sleep(3 * time.Second)
 
 			log.Print("------------------------")
 
 			log.Printf("> Elapsed=%v", time.Now().Sub(startTime))
 			mu.Lock()
-			log.Printf("> GetLatencyMin=%v GetLatencyMax=%v GetLatencyAvg=%v GetRatePerSec=%d",
-				gGetStat.min, gGetStat.max, gGetStat.avg(), gGetStat.ratePerSec())
-			log.Printf("> IterLatencyMin=%v IterLatencyMax=%v IterLatencyAvg=%v IterRatePerSec=%d",
-				gIterStat.min, gIterStat.max, gIterStat.avg(), gIterStat.ratePerSec())
-			log.Printf("> WriteLatencyMin=%v WriteLatencyMax=%v WriteLatencyAvg=%v WriteRatePerSec=%d",
-				gWriteStat.min, gWriteStat.max, gWriteStat.avg(), gWriteStat.ratePerSec())
-			log.Printf("> TransactionLatencyMin=%v TransactionLatencyMax=%v TransactionLatencyAvg=%v TransactionRatePerSec=%d",
-				gTrasactionStat.min, gTrasactionStat.max, gTrasactionStat.avg(), gTrasactionStat.ratePerSec())
+			log.Printf("> GetLatencyMin=%v GetLatencyMax=%v GetLatencyAvg=%v GetRatePerSec=%d", gGetStat.min, gGetStat.max, gGetStat.avg(), gGetStat.ratePerSec())
+			log.Printf("> IterLatencyMin=%v IterLatencyMax=%v IterLatencyAvg=%v IterRatePerSec=%d", gIterStat.min, gIterStat.max, gIterStat.avg(), gIterStat.ratePerSec())
+			log.Printf("> WriteLatencyMin=%v WriteLatencyMax=%v WriteLatencyAvg=%v WriteRatePerSec=%d", gWriteStat.min, gWriteStat.max, gWriteStat.avg(), gWriteStat.ratePerSec())
+			log.Printf("> TransactionLatencyMin=%v TransactionLatencyMax=%v TransactionLatencyAvg=%v TransactionRatePerSec=%d", gTrasactionStat.min, gTrasactionStat.max, gTrasactionStat.avg(), gTrasactionStat.ratePerSec())
 			mu.Unlock()
 
 			cachedblock, _ := db.GetProperty("leveldb.cachedblock")
@@ -427,23 +442,28 @@ func main() {
 			blockpool, _ := db.GetProperty("leveldb.blockpool")
 			writeDelay, _ := db.GetProperty("leveldb.writedelay")
 			ioStats, _ := db.GetProperty("leveldb.iostats")
-			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q IOStats=%q",
-				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay, ioStats)
+			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q IOStats=%q", cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay, ioStats)
 			log.Print("------------------------")
 		}
 	}()
 
+	// 这里开始写入数据
 	for ns, numKey := range numKeys {
 		func(ns, numKey int) {
+			// 开始进入测试流程
 			log.Printf("[%02d] STARTING: numKey=%d", ns, numKey)
 
 			keys := make([][]byte, numKey)
 			for i := range keys {
+				// 随机产生key，prefix是1
 				keys[i] = randomData(nil, byte(ns), 1, uint32(i), keyLen)
 			}
 
+			// 这个协程是负责写入数据的；
+			// 这个协程是负责写入数据，生成快照，开然后进行验证的。
 			wg.Add(1)
 			go func() {
+				// wi是写入数据的条数
 				var wi uint32
 				defer func() {
 					log.Printf("[%02d] WRITER DONE #%d", ns, wi)
@@ -455,38 +475,52 @@ func main() {
 					k2, v2  []byte
 					nReader int32
 				)
+				// 在这里判断是否要停止 done是程序的停止信号
 				for atomic.LoadUint32(&done) == 0 {
 					log.Printf("[%02d] WRITER #%d", ns, wi)
 
+					// b清空
 					b.Reset()
+					// 在这里把所有的key value都写进去了。
 					for _, k1 := range keys {
+						// 向b里面写入数据
+						// 随机生成key prefix是2
 						k2 = randomData(k2, byte(ns), 2, wi, keyLen)
+						// 随机生成key prefix是3
 						v2 = randomData(v2, byte(ns), 3, wi, valueLen)
-						b.Put(k2, v2)
-						b.Put(k1, k2)
+						b.Put(k2, v2) // 写入key prefix是2的
+						b.Put(k1, k2) // 写入key prefix是1的
 					}
+					// 写入writeChan里面
 					writeReq <- b
+					// 在这里等ack
 					if err := <-writeAck; err != nil {
+						// TODO 但是这里为啥是个struct{}{}呢？
 						writeAckAck <- struct{}{}
+						// 这里是fatal，如果运行到这里，程序就gg了。
 						fatalf(err, "[%02d] WRITER #%d db.Write: %v", ns, wi, err)
 					}
-
+					// 获取快照，每一批写入都获取依次快照
 					snap, err := db.GetSnapshot()
 					if err != nil {
 						writeAckAck <- struct{}{}
+						// 这里是fatal，如果运行到这里，程序就gg了。
 						fatalf(err, "[%02d] WRITER #%d db.GetSnapshot: %v", ns, wi, err)
 					}
 
+					// 正常情况下会走到这里；
 					writeAckAck <- struct{}{}
 
 					wg.Add(1)
+					// reader数量+1
 					atomic.AddInt32(&nReader, 1)
 					go func(snapwi uint32, snap *leveldb.Snapshot) {
 						var (
-							ri       int
-							iterStat = &latencyStats{}
-							getStat  = &latencyStats{}
+							ri       int               // 读计数
+							iterStat = &latencyStats{} // 遍历统计
+							getStat  = &latencyStats{} // 获取值统计
 						)
+						// 这里是统计信息
 						defer func() {
 							mu.Lock()
 							gGetStat.add(getStat)
@@ -499,10 +533,14 @@ func main() {
 							wg.Done()
 						}()
 
-						stopi := snapwi + 3
+						// TODO ???? 这个可能需要了解一下低层数据的存储格式；
+						stopi := snapwi + 3 // 快照里面数据数量+3=stopi；也就是停止遍历的index
+						// TODO 这个循环的终止条件没咋理解
 						for (ri < 3 || atomic.LoadUint32(&wi) < stopi) && atomic.LoadUint32(&done) == 0 {
 							var n int
+							// 只遍历prefix为1的数据
 							iter := snap.NewIterator(dataPrefixSlice(byte(ns), 1), nil)
+							// 这里依次获取数据
 							iterStat.start()
 							for iter.Next() {
 								k1 := iter.Key()
@@ -519,17 +557,19 @@ func main() {
 								}
 
 								getStat.start()
+								// 从快照里面获取k2的值
 								v2, err := snap.Get(k2, nil)
 								if err != nil {
 									fatalf(err, "[%02d] READER #%d.%d K%d snap.Get: %v\nk1: %x\n -> k2: %x", ns, snapwi, ri, n, err, k1, k2)
 								}
 								getStat.record(1)
 
+								// 校验校验和
 								if checksum0, checksum1 := dataChecksum(v2); checksum0 != checksum1 {
 									err := &errors.ErrCorrupted{Fd: storage.FileDesc{Type: 0xff, Num: 0}, Err: fmt.Errorf("v2: %x: checksum mismatch: %v vs %v", v2, checksum0, checksum1)}
 									fatalf(err, "[%02d] READER #%d.%d K%d snap.Get: %v\nk1: %x\n -> k2: %x", ns, snapwi, ri, n, err, k1, k2)
 								}
-
+								// 统计数量
 								n++
 								iterStat.start()
 							}
@@ -537,18 +577,24 @@ func main() {
 							if err := iter.Error(); err != nil {
 								fatalf(err, "[%02d] READER #%d.%d K%d iter.Error: %v", ns, snapwi, ri, numKey, err)
 							}
+							// TODO ???? 这里为啥相等呢？n是snapshot中的key value数量，numKey是当前测试批次应该写入、读取的key数量
+							// TODO snapshot不是每写入两个key就生成一个吗？
+							// 不是，是每一个批次的key value写入进去后生成一个快照，然后来快照里面读；不是每一个key都生成；
 							if n != numKey {
 								fatalf(nil, "[%02d] READER #%d.%d missing keys: want=%d got=%d", ns, snapwi, ri, numKey, n)
 							}
-
-							ri++
+							ri++ // 读取数据的数量
 						}
 					}(wi, snap)
 
+					// 数据条数+1
 					atomic.AddUint32(&wi, 1)
 				}
 			}()
 
+			// TODO 这个是读协程 感觉这个协程不是用来读的，是用来删除prefix == 2 || m.rand.int()%999 = 0的这部分数据的
+			// 这里的这部分数据哪里来的呢？
+			// 这个协程也是写入数据的，只不过写入的是删除数据。因为levelDB只能是APPEND，所以删除也是一种APPEND
 			delB := new(leveldb.Batch)
 			wg.Add(1)
 			go func() {
@@ -562,17 +608,20 @@ func main() {
 				}()
 
 				time.Sleep(2 * time.Second)
-
+				// 在这里判断是否要停止 done是程序的停止信号
 				for atomic.LoadUint32(&done) == 0 {
 					var n int
 					delB.Reset()
 					iter := db.NewIterator(dataNsSlice(byte(ns)), nil)
 					iterStat.start()
+					// 开始依次读。但是读出来的数据干嘛了呢？感觉只是删除了delB中的一部分数据，没有干别的了。
 					for iter.Next() && atomic.LoadUint32(&done) == 0 {
 						k := iter.Key()
 						v := iter.Value()
 						iterStat.record(1)
 
+						// TODO 这个循环写的。。。ci==0的时候是key ci==1的时候是value
+						// 依次校验key和value的校验和
 						for ci, x := range [...][]byte{k, v} {
 							checksum0, checksum1 := dataChecksum(x)
 							if checksum0 != checksum1 {
@@ -583,13 +632,15 @@ func main() {
 								}
 							}
 						}
-
-						if dataPrefix(k) == 2 || mrand.Int()%999 == 0 {
+						// 从delB中删除一部分数据
+						// 哦哦哦。这里其实也是写入数据。写入删除的数据
+						// 删除key prefix是2的。相当于删了一半的数据
+						if dataPrefix(k) == 2 || mrand.Int()%999 == 0 { // TODO 后面这个随机数没看懂。纯粹删一半数据不是更好吗？便于统计。你这又多删除那么几个干嘛
 							delB.Delete(k)
 						}
-
+						// 统计读了多少key-value对数据
 						n++
-						iterStat.start()
+						iterStat.start() // 统计信息
 					}
 					iter.Release()
 					if err := iter.Error(); err != nil {
@@ -618,6 +669,7 @@ func main() {
 		}(ns, numKey)
 	}
 
+	// 这个是接收停止信号的。
 	go func() {
 		sig := make(chan os.Signal)
 		signal.Notify(sig, os.Interrupt, os.Kill)
