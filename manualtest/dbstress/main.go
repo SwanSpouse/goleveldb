@@ -93,17 +93,22 @@ func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
 	if dataLen < (2+4+4)*2+4 {
 		panic("dataLen is too small")
 	}
+	// 将dst扩大或者截断为dataLen这么长
 	if cap(dst) < dataLen {
 		dst = make([]byte, dataLen)
 	} else {
 		dst = dst[:dataLen]
 	}
+	// TODO -4是啥意思
 	half := (dataLen - 4) / 2
 	if _, err := rand.Reader.Read(dst[2 : half-8]); err != nil {
 		panic(err)
 	}
+	// 第一位是ns，在这段代码里面ns是key的序号；
+	// 第二位是prefix
 	dst[0] = ns
 	dst[1] = prefix
+	// TODO 这里也没看懂啊，这两行不是重复了吗？
 	binary.LittleEndian.PutUint32(dst[half-8:], i)
 	binary.LittleEndian.PutUint32(dst[half-8:], i)
 	binary.LittleEndian.PutUint32(dst[half-4:], util.NewCRC(dst[:half-4]).Value())

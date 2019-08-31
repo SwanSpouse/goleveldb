@@ -36,8 +36,8 @@ func (kt kType) String() string {
 // Value types encoded as the last component of internal keys.
 // Don't modify; this value are saved to disk.
 const (
-	ktDel kType = iota
-	ktVal
+	ktDel kType = iota // 删除
+	ktVal              // value
 )
 
 // ktSeek defines the kType that should be passed when constructing an
@@ -65,24 +65,31 @@ func init() {
 
 type iKey []byte
 
+// key的结构是这样的:
+// | ------------ data ---------- | 8 bytes |
 func newIkey(ukey []byte, seq uint64, kt kType) iKey {
 	if seq > kMaxSeq {
 		panic("leveldb: invalid sequence number")
 	} else if kt > ktVal {
 		panic("leveldb: invalid type")
 	}
-
 	ik := make(iKey, len(ukey)+8)
+	// 把数据拷ik里面
 	copy(ik, ukey)
+	// 这里seq左移8位，然后或上key的类型
+	// TODO seq左移8位是啥意思
 	binary.LittleEndian.PutUint64(ik[len(ukey):], (seq<<8)|uint64(kt))
 	return ik
 }
 
+// 解析一个key
 func parseIkey(ik []byte) (ukey []byte, seq uint64, kt kType, err error) {
 	if len(ik) < 8 {
 		return nil, 0, 0, newErrIkeyCorrupted(ik, "invalid length")
 	}
 	num := binary.LittleEndian.Uint64(ik[len(ik)-8:])
+	// num右移8位，能够获取到seq
+	// kt是取后8位，然后做&操作
 	seq, kt = uint64(num>>8), kType(num&0xff)
 	if kt > ktVal {
 		return nil, 0, 0, newErrIkeyCorrupted(ik, "invalid type")
@@ -91,11 +98,13 @@ func parseIkey(ik []byte) (ukey []byte, seq uint64, kt kType, err error) {
 	return
 }
 
+// 判断key是否有效
 func validIkey(ik []byte) bool {
 	_, _, _, err := parseIkey(ik)
 	return err == nil
 }
 
+// 保证key不为空，且长度>=8
 func (ik iKey) assert() {
 	if ik == nil {
 		panic("leveldb: nil iKey")
