@@ -92,7 +92,9 @@ type fileStorage struct {
 //
 // The storage must be closed after use, by calling Close method.
 func OpenFile(path string, readOnly bool) (Storage, error) {
+	// 查看path是否存在
 	if fi, err := os.Stat(path); err == nil {
+		// path需要是一个文件夹路径；
 		if !fi.IsDir() {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
 		}
@@ -103,7 +105,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 	} else {
 		return nil, err
 	}
-
+	// 文件锁 防止并发
 	flock, err := newFileLock(filepath.Join(path, "LOCK"), readOnly)
 	if err != nil {
 		return nil, err
@@ -119,18 +121,19 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		logw    *os.File
 		logSize int64
 	)
+	// 如果不是只读模式的话会获取log文件的写句柄；
 	if !readOnly {
 		logw, err = os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			return nil, err
 		}
+		// 直接将offset指导文件的末尾
 		logSize, err = logw.Seek(0, os.SEEK_END)
 		if err != nil {
 			logw.Close()
 			return nil, err
 		}
 	}
-
 	fs := &fileStorage{
 		path:     path,
 		readOnly: readOnly,

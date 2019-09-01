@@ -36,7 +36,7 @@ func newErrManifestCorrupted(fd storage.FileDesc, field, reason string) error {
 // session represent a persistent database session.
 type session struct {
 	// Need 64-bit alignment.
-	stNextFileNum    int64 // current unused file number
+	stNextFileNum    int64 // current unused file number 当前没有使用的文件序号
 	stJournalNum     int64 // current journal file number; need external synchronization
 	stPrevJournalNum int64 // prev journal file number; no longer used; for compatibility with older version of leveldb
 	stTempFileNum    int64

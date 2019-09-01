@@ -117,9 +117,11 @@ func (db *DB) mpoolDrain() {
 	}
 }
 
+// 创建一个内存数据库，同时冻结老的内存数据库；需要在外面进行同步操作
 // Create new memdb and froze the old one; need external synchronization.
 // newMem only called synchronously by the writer.
 func (db *DB) newMem(n int) (mem *memDB, err error) {
+	// 创建文件
 	fd := storage.FileDesc{Type: storage.TypeJournal, Num: db.s.allocFileNum()}
 	w, err := db.s.stor.Create(fd)
 	if err != nil {
@@ -144,12 +146,15 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 	db.journalWriter = w
 	db.journalFd = fd
 	db.frozenMem = db.mem
+	// 从mPool中获取一个内存数据库
 	mem = db.mpoolGet(n)
+	// 索引计数法。垃圾回收里面的概念；索引技术加2；1个是自己1个是调用方
 	mem.incref() // for self
 	mem.incref() // for caller
 	db.mem = mem
 	// The seq only incremented by the writer. And whoever called newMem
 	// should hold write lock, so no need additional synchronization here.
+	// 冻结内存数据库的序号
 	db.frozenSeq = db.seq
 	return
 }

@@ -28,6 +28,7 @@ import (
 )
 
 // DB is a LevelDB database.
+// levelDB的数据结构
 type DB struct {
 	// Need 64-bit alignment.
 	seq uint64
@@ -53,12 +54,12 @@ type DB struct {
 
 	// Snapshot.
 	snapsMu   sync.Mutex
-	snapsList *list.List
+	snapsList *list.List // 双端链表
 
 	// Write.
 	batchPool    sync.Pool
-	writeMergeC  chan writeMerge
-	writeMergedC chan bool
+	writeMergeC  chan writeMerge // 准备merge 无缓冲区
+	writeMergedC chan bool       // 已经merge
 	writeLockC   chan struct{}
 	writeAckC    chan error
 	writeDelay   time.Duration
@@ -72,7 +73,7 @@ type DB struct {
 	mcompCmdC        chan cCmd
 	compErrC         chan error
 	compPerErrC      chan error
-	compErrSetC      chan error
+	compErrSetC      chan error // 在这里收集error
 	compWriteLocking bool
 	compStats        cStats
 	memdbMaxLevel    int // For testing.
@@ -97,7 +98,7 @@ func openDB(s *session) (*DB, error) {
 		snapsList: list.New(),
 		// Write
 		batchPool:    sync.Pool{New: newBatch},
-		writeMergeC:  make(chan writeMerge),
+		writeMergeC:  make(chan writeMerge), // 无缓冲区
 		writeMergedC: make(chan bool),
 		writeLockC:   make(chan struct{}, 1),
 		writeAckC:    make(chan error),
@@ -125,7 +126,7 @@ func openDB(s *session) (*DB, error) {
 		if err := db.recoverJournal(); err != nil {
 			return nil, err
 		}
-
+		// 清理无用的文件
 		// Remove any obsolete files.
 		if err := db.checkAndCleanFiles(); err != nil {
 			// Close journal.
@@ -168,6 +169,7 @@ func openDB(s *session) (*DB, error) {
 //
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
+// open 返回的DB是并发安全的
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(stor, o)
 	if err != nil {

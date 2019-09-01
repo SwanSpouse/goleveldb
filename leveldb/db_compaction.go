@@ -82,15 +82,19 @@ func (p *cStats) getStat(level int) (duration time.Duration, read, write int64) 
 	return
 }
 
+// TODO 这里没太搞定是在干什么。error分类？
 func (db *DB) compactionError() {
 	var err error
 noerr:
 	// No error.
 	for {
 		select {
+		// 从compErrSetC中获取一个err
 		case err = <-db.compErrSetC:
 			switch {
+			// 如果error为空，则啥也不做
 			case err == nil:
+			// 如果是以下error，则跳转到hasperr循环中
 			case err == ErrReadOnly, errors.IsCorrupted(err):
 				goto hasperr
 			default:

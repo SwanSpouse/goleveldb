@@ -215,7 +215,9 @@ func (b *Batch) decode(data []byte, expectedLen int) error {
 func (b *Batch) putMem(seq uint64, mdb *memdb.DB) error {
 	var ik []byte
 	for i, index := range b.index {
+		// 获取写入的key
 		ik = makeInternalKey(ik, index.k(b.data), seq+uint64(i), index.keyType)
+		// 写入key Value
 		if err := mdb.Put(ik, index.v(b.data)); err != nil {
 			return err
 		}
@@ -308,6 +310,7 @@ func decodeBatchToMem(data []byte, expectSeq uint64, mdb *memdb.DB) (seq uint64,
 	return
 }
 
+// 对batch的头部信息进行encode
 func encodeBatchHeader(dst []byte, seq uint64, batchLen int) []byte {
 	dst = ensureBuffer(dst, batchHeaderLen)
 	binary.LittleEndian.PutUint64(dst, seq)
@@ -336,10 +339,12 @@ func batchesLen(batches []*Batch) int {
 	return batchLen
 }
 
+// 写入batches
 func writeBatchesWithHeader(wr io.Writer, batches []*Batch, seq uint64) error {
 	if _, err := wr.Write(encodeBatchHeader(nil, seq, batchesLen(batches))); err != nil {
 		return err
 	}
+	// 开始依次写入数据
 	for _, batch := range batches {
 		if _, err := wr.Write(batch.data); err != nil {
 			return err

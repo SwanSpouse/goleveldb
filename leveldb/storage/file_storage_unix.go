@@ -17,6 +17,7 @@ type unixFileLock struct {
 	f *os.File
 }
 
+// 释放文件锁
 func (fl *unixFileLock) release() error {
 	if err := setFileLock(fl.f, false, false); err != nil {
 		return err
@@ -24,6 +25,7 @@ func (fl *unixFileLock) release() error {
 	return fl.f.Close()
 }
 
+// 创建一个文件锁
 func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	var flag int
 	if readOnly {
@@ -47,6 +49,12 @@ func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	return
 }
 
+/*
+flock主要三种操作类型：
+	LOCK_SH，共享锁，多个进程可以使用同一把锁，常被用作读共享锁；
+	LOCK_EX，排他锁，同时只允许一个进程使用，常被用作写锁；
+	LOCK_UN，释放锁；
+*/
 func setFileLock(f *os.File, readOnly, lock bool) error {
 	how := syscall.LOCK_UN
 	if lock {
@@ -56,6 +64,9 @@ func setFileLock(f *os.File, readOnly, lock bool) error {
 			how = syscall.LOCK_EX
 		}
 	}
+	// flock 是对于整个文件的建议性锁。也就是说，如果一个进程在一个文件（inode）上放了锁，那么其它进程是可以知道的。
+	// （建议性锁不强求进程遵守。） 最棒的一点是，它的第一个参数是文件描述符，在此文件描述符关闭时，锁会自动释放。
+	// 而当进程终止时，所有的文件描述符均会被关闭。所以很多时候就不用考虑类似原子锁解锁的事情。
 	return syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
 }
 

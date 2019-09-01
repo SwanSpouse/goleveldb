@@ -16,6 +16,7 @@ import (
 )
 
 func (db *DB) writeJournal(batches []*Batch, seq uint64, sync bool) error {
+	// 获取writer的句柄
 	wr, err := db.journal.Next()
 	if err != nil {
 		return err
@@ -130,6 +131,8 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 	return
 }
 
+// 一次写merge的数据结构
+// writeMerge >= batch
 type writeMerge struct {
 	sync       bool
 	batch      *Batch
@@ -164,7 +167,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 	var (
 		overflow bool
 		merged   int
-		batches  = []*Batch{batch}
+		batches  = []*Batch{batch} // 初始化当前要进行merge的batch
 	)
 
 	if merge {
@@ -181,6 +184,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 		}
 
 	merge:
+		// merge的长度限制
 		for mergeLimit > 0 {
 			select {
 			case incoming := <-db.writeMergeC:
@@ -190,6 +194,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 						overflow = true
 						break merge
 					}
+					// 把从chan里面获取到的batch也填到数组里
 					batches = append(batches, incoming.batch)
 					mergeLimit -= incoming.batch.internalLen
 				} else {
@@ -199,10 +204,11 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 						overflow = true
 						break merge
 					}
+					// 如果ourBatch为空nil；则从BatchPool中获取一个
 					if ourBatch == nil {
 						ourBatch = db.batchPool.Get().(*Batch)
 						ourBatch.Reset()
-						batches = append(batches, ourBatch)
+						batches = append(batches, ourBatch) // TODO 如果ourBatch不为nil，则没有了这一步操作
 					}
 					// We can use same batch since concurrent write doesn't
 					// guarantee write order.
@@ -211,28 +217,32 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 				}
 				sync = sync || incoming.sync
 				merged++
+				// 写入到writeMergedC 里面
 				db.writeMergedC <- true
-
+			// 如果db.writeMergeC中没有需要进行merge的，直接break
 			default:
 				break merge
 			}
 		}
 	}
 
+	// 将ourBatch释放回batchPool中
 	// Release ourBatch if any.
 	if ourBatch != nil {
 		defer db.batchPool.Put(ourBatch)
 	}
 
-	// Seq number.
+	// Seq number. TODO 这个seq number和下面的db.addSeq有啥不同
 	seq := db.seq + 1
 
 	// Write journal.
+	// 开始写，难道这里就是WAL？
 	if err := db.writeJournal(batches, seq, sync); err != nil {
 		db.unlockWrite(overflow, merged, err)
 		return err
 	}
 
+	// 向内存里面写batch
 	// Put batches.
 	for _, batch := range batches {
 		if err := batch.putMem(seq, mdb.DB); err != nil {
@@ -249,6 +259,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 		db.rotateMem(0, false)
 	}
 
+	// 释放写锁
 	db.unlockWrite(overflow, merged, nil)
 	return nil
 }
@@ -280,6 +291,7 @@ func (db *DB) Write(batch *Batch, wo *opt.WriteOptions) error {
 		return tr.Commit()
 	}
 
+	// 从配置中读取是否允许进行merge
 	merge := !wo.GetNoWriteMerge() && !db.s.o.GetNoWriteMerge()
 	sync := wo.GetSync() && !db.s.o.GetNoSync()
 
@@ -436,6 +448,7 @@ func (db *DB) CompactRange(r util.Range) error {
 }
 
 // SetReadOnly makes DB read-only. It will stay read-only until reopened.
+// 会一直保持read only模式，直到重启
 func (db *DB) SetReadOnly() error {
 	if err := db.ok(); err != nil {
 		return err
@@ -445,6 +458,7 @@ func (db *DB) SetReadOnly() error {
 	select {
 	case db.writeLockC <- struct{}{}:
 		db.compWriteLocking = true
+	// TODO 这里是啥意思？
 	case err := <-db.compPerErrC:
 		return err
 	case <-db.closeC:
