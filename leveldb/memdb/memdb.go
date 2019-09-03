@@ -179,6 +179,7 @@ const (
 )
 
 // DB is an in-memory key/value database.
+// 其实是个跳跃表
 type DB struct {
 	cmp comparer.BasicComparer
 	rnd *rand.Rand
@@ -198,6 +199,7 @@ type DB struct {
 	kvSize    int
 }
 
+// 随机产生一个高度，越高层级，概率越低；它这个是25%的几率增高一层
 func (p *DB) randHeight() (h int) {
 	const branching = 4
 	h = 1
@@ -208,6 +210,7 @@ func (p *DB) randHeight() (h int) {
 }
 
 // Must hold RW-lock if prev == true, as it use shared prevNode slice.
+// 找到>= key的值
 func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 	node := 0
 	h := p.maxHeight - 1
