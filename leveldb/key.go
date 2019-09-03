@@ -30,6 +30,8 @@ func newErrInternalKeyCorrupted(ikey []byte, reason string) error {
 
 type keyType uint
 
+// 有两种类型的写入，一种是直接写入，一种是删除；
+// leveldb中只允许APPEND所以删除也是APPEND
 func (kt keyType) String() string {
 	switch kt {
 	case keyTypeDel:

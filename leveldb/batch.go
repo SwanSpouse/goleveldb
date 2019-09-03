@@ -42,6 +42,7 @@ type BatchReplay interface {
 	Delete(key []byte)
 }
 
+// 一个key-value的索引信息
 type batchIndex struct {
 	keyType            keyType
 	keyPos, keyLen     int
@@ -73,41 +74,60 @@ type Batch struct {
 }
 
 func (b *Batch) grow(n int) {
+	// 当前长度
 	o := len(b.data)
+	// 判断是否需要扩展
 	if cap(b.data)-o < n {
 		div := 1
+		// 如果超过batchGrowRec，扩容速率就不会是简单的翻倍o了
 		if len(b.index) > batchGrowRec {
 			div = len(b.index) / batchGrowRec
 		}
+		// 创建一个新的数组，这个扩容的策略很有意思啊，只是扩了cap，然后扩的容量最少是o+n
 		ndata := make([]byte, o, o+n+o/div)
+		// 将数据复制过去
 		copy(ndata, b.data)
+		// 扩容结束赋值给b.data
 		b.data = ndata
 	}
 }
 
+// 进行append操作
 func (b *Batch) appendRec(kt keyType, key, value []byte) {
+	// key
 	n := 1 + binary.MaxVarintLen32 + len(key)
+	// 如果是append值操作，则填上去value；
+	// 如果是del值操作，则不填value
 	if kt == keyTypeVal {
 		n += binary.MaxVarintLen32 + len(value)
 	}
+	// 首先要保证b足够长
 	b.grow(n)
 	index := batchIndex{keyType: kt}
 	o := len(b.data)
 	data := b.data[:o+n]
+	// 把keyType塞进去
 	data[o] = byte(kt)
 	o++
+	// 把key的长度写进去
 	o += binary.PutUvarint(data[o:], uint64(len(key)))
 	index.keyPos = o
 	index.keyLen = len(key)
+	// 把key的值写进去
 	o += copy(data[o:], key)
+	// 如果有value的话把value写进去
 	if kt == keyTypeVal {
+		// 和key的写入方式一样，先写进去长度；再写value
 		o += binary.PutUvarint(data[o:], uint64(len(value)))
 		index.valuePos = o
 		index.valueLen = len(value)
 		o += copy(data[o:], value)
 	}
+	// 把数据写回去
 	b.data = data[:o]
+	// 把索引添加到数组里
 	b.index = append(b.index, index)
+	// 长度增加key value长度+value value的长度 加上两个长度值
 	b.internalLen += index.keyLen + index.valueLen + 8
 }
 
