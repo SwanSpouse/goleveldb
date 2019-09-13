@@ -171,20 +171,19 @@ func (i *dbIter) Release() {
 }
 
 const (
-	nKV = iota
-	nKey
-	nVal
-	nHeight
-	nNext
+	nKV     = iota // 0 kv offset
+	nKey           // 1 key length
+	nVal           // 2 value length
+	nHeight        // height
+	nNext          // next nodes
 )
 
 // DB is an in-memory key/value database.
 // 其实是个跳跃表
 type DB struct {
-	cmp comparer.BasicComparer
-	rnd *rand.Rand
-
-	mu     sync.RWMutex
+	cmp    comparer.BasicComparer // 比较器
+	rnd    *rand.Rand             // 用于产生层高的随机因子
+	mu     sync.RWMutex           // 内存中的数据是要加锁的
 	kvData []byte
 	// Node data:
 	// [0]         : KV offset
@@ -281,6 +280,7 @@ func (p *DB) Put(key []byte, value []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// 首先看>= key的是否存在
 	if node, exact := p.findGE(key, true); exact {
 		kvOffset := len(p.kvData)
 		p.kvData = append(p.kvData, key...)
@@ -428,6 +428,7 @@ func (p *DB) Size() int {
 }
 
 // Free returns keys/values free buffer before need to grow.
+// 还能容纳多少key-value
 func (p *DB) Free() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -435,6 +436,7 @@ func (p *DB) Free() int {
 }
 
 // Len returns the number of entries in the DB.
+// memdb中元素的个数
 func (p *DB) Len() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -442,6 +444,7 @@ func (p *DB) Len() int {
 }
 
 // Reset resets the DB to initial empty state. Allows reuse the buffer.
+// 清空memdb
 func (p *DB) Reset() {
 	p.mu.Lock()
 	p.rnd = rand.New(rand.NewSource(0xdeadbeef))
@@ -469,14 +472,17 @@ func (p *DB) Reset() {
 // reclaim KV buffer.
 //
 // The returned DB instance is safe for concurrent use.
+// 并发安全，只读，TODO limingji 删除会删除一个节点，但是不会回收kv buffer中的内存？
+// 这个capacity是建议性的，不是强制的。
 func New(cmp comparer.BasicComparer, capacity int) *DB {
 	p := &DB{
 		cmp:       cmp,
-		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
-		maxHeight: 1,
+		rnd:       rand.New(rand.NewSource(0xdeadbeef)), // TODO limingji 这里的随机种子是一样的是吗？
+		maxHeight: 1,                                    // TODO limingji 最高层是1？
 		kvData:    make([]byte, 0, capacity),
-		nodeData:  make([]int, 4+tMaxHeight),
+		nodeData:  make([]int, 4+tMaxHeight), // TODO limingji
 	}
+	// TODO limingji 这个是头结点吗?
 	p.nodeData[nHeight] = tMaxHeight
 	return p
 }
