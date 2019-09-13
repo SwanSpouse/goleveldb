@@ -17,11 +17,12 @@ import (
 type FileType int
 
 // File types.
+// 文件类型
 const (
-	TypeManifest FileType = 1 << iota
-	TypeJournal
-	TypeTable
-	TypeTemp
+	TypeManifest FileType = 1 << iota // 清单文件 reference google
+	TypeJournal                       // 日志文件
+	TypeTable                         // 表文件
+	TypeTemp                          // 临时文件
 
 	TypeAll = TypeManifest | TypeJournal | TypeTable | TypeTemp
 )
@@ -102,6 +103,7 @@ type FileDesc struct {
 	Num  int64
 }
 
+// 不同的文件有不同的后缀名
 func (fd FileDesc) String() string {
 	switch fd.Type {
 	case TypeManifest:
@@ -136,6 +138,7 @@ func FileDescOk(fd FileDesc) bool {
 }
 
 // Storage is the storage. A storage instance must be safe for concurrent use.
+// 存储模型的抽象，其子类必须是并发安全的
 type Storage interface {
 	// Lock locks the storage. Any subsequent attempt to call Lock will fail
 	// until the last lock released.

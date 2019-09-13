@@ -33,6 +33,7 @@ func (lock *memStorageLock) Unlock() {
 }
 
 // memStorage is a memory-backed storage.
+// 内存storage
 type memStorage struct {
 	mu    sync.Mutex
 	slock *memStorageLock
@@ -99,10 +100,12 @@ func (ms *memStorage) Open(fd FileDesc) (Reader, error) {
 
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	// 判断当前文件描述符是否已经有对应的memFile
 	if m, exist := ms.files[packFile(fd)]; exist {
 		if m.open {
 			return nil, errFileOpen
 		}
+		// 存在memFile 同时没有open，则open，并返回
 		m.open = true
 		return &memReader{Reader: bytes.NewReader(m.Bytes()), ms: ms, m: m}, nil
 	}
@@ -122,8 +125,10 @@ func (ms *memStorage) Create(fd FileDesc) (Writer, error) {
 		if m.open {
 			return nil, errFileOpen
 		}
+		// 重置
 		m.Reset()
 	} else {
+		// 创建一个memFile
 		m = &memFile{}
 		ms.files[x] = m
 	}
@@ -131,6 +136,7 @@ func (ms *memStorage) Create(fd FileDesc) (Writer, error) {
 	return &memWriter{memFile: m, ms: ms}, nil
 }
 
+// 删除
 func (ms *memStorage) Remove(fd FileDesc) error {
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
@@ -146,6 +152,7 @@ func (ms *memStorage) Remove(fd FileDesc) error {
 	return os.ErrNotExist
 }
 
+// 重命名
 func (ms *memStorage) Rename(oldfd, newfd FileDesc) error {
 	if !FileDescOk(oldfd) || !FileDescOk(newfd) {
 		return ErrInvalidFile

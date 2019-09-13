@@ -74,13 +74,12 @@ const logSizeThreshold = 1024 * 1024 // 1 MiB
 type fileStorage struct {
 	path     string
 	readOnly bool
-
-	mu      sync.Mutex
-	flock   fileLock
-	slock   *fileStorageLock
-	logw    *os.File
-	logSize int64
-	buf     []byte
+	mu       sync.Mutex // 会有锁
+	flock    fileLock
+	slock    *fileStorageLock
+	logw     *os.File // 这个日志真的就是日志啊。。。我还以为是WAL的Log呢
+	logSize  int64
+	buf      []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
 	day  int
@@ -92,13 +91,14 @@ type fileStorage struct {
 //
 // The storage must be closed after use, by calling Close method.
 func OpenFile(path string, readOnly bool) (Storage, error) {
-	// 查看path是否存在
+	// 查看path是否存在，如果存在的话路径需要是一个目录
 	if fi, err := os.Stat(path); err == nil {
-		// path需要是一个文件夹路径；
 		if !fi.IsDir() {
+			// 非目录的话会打开失败
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
 		}
 	} else if os.IsNotExist(err) && !readOnly {
+		// 如果路径不存在 且有些权限的话，会进行创建
 		if err := os.MkdirAll(path, 0755); err != nil {
 			return nil, err
 		}
@@ -106,11 +106,11 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		return nil, err
 	}
 	// 文件锁 防止并发
+	// 不仅仅是创建文件锁，这个时候已经加上锁了，
 	flock, err := newFileLock(filepath.Join(path, "LOCK"), readOnly)
 	if err != nil {
 		return nil, err
 	}
-
 	defer func() {
 		if err != nil {
 			flock.release()
@@ -134,13 +134,17 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 			return nil, err
 		}
 	}
+	// 构建一个 file storage
 	fs := &fileStorage{
 		path:     path,
 		readOnly: readOnly,
-		flock:    flock,
-		logw:     logw,
-		logSize:  logSize,
+		flock:    flock,   // 这个是文件锁的句柄
+		logw:     logw,    // 写日志的句柄
+		logSize:  logSize, // 当前日志的大小L
 	}
+	// TODO 这个还适用于各种其他项目，可以check一下其他项目有没有，然后提个mr
+	// 这个是给gc用的，保证在gc的时候能够执行fileStorage.Close方法
+	// 如果一个对象在被从内存移除前需要执行一些特殊的操作，比如写日志啥的，或者释放文件锁啥的。
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
 }
@@ -179,21 +183,27 @@ func itoa(buf []byte, i int, wid int) []byte {
 }
 
 func (fs *fileStorage) printDay(t time.Time) {
+	// 如果当天打过就不打了？
 	if fs.day == t.Day() {
 		return
 	}
+	// 按照指定的各式打印时间
 	fs.day = t.Day()
 	fs.logw.Write([]byte("=============== " + t.Format("Jan 2, 2006 (MST)") + " ===============\n"))
 }
 
+// 在这里开始真正写log
 func (fs *fileStorage) doLog(t time.Time, str string) {
+	// 如果当前的log大小超过了阈值
 	if fs.logSize > logSizeThreshold {
 		// Rotate log file.
 		fs.logw.Close()
+		// 将当前句柄置为空，同时rename file
 		fs.logw = nil
 		fs.logSize = 0
 		rename(filepath.Join(fs.path, "LOG"), filepath.Join(fs.path, "LOG.old"))
 	}
+	// 如果log句柄为空，则创建一个新的
 	if fs.logw == nil {
 		var err error
 		fs.logw, err = os.OpenFile(filepath.Join(fs.path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
@@ -207,6 +217,7 @@ func (fs *fileStorage) doLog(t time.Time, str string) {
 	hour, min, sec := t.Clock()
 	msec := t.Nanosecond() / 1e3
 	// time
+	// 把时间写到buf里面
 	fs.buf = itoa(fs.buf[:0], hour, 2)
 	fs.buf = append(fs.buf, ':')
 	fs.buf = itoa(fs.buf, min, 2)
@@ -216,24 +227,30 @@ func (fs *fileStorage) doLog(t time.Time, str string) {
 	fs.buf = itoa(fs.buf, msec, 6)
 	fs.buf = append(fs.buf, ' ')
 	// write
+	// 把数据写入到里面
 	fs.buf = append(fs.buf, []byte(str)...)
 	fs.buf = append(fs.buf, '\n')
 	n, _ := fs.logw.Write(fs.buf)
+	// 同时加logSize
 	fs.logSize += int64(n)
 }
 
 func (fs *fileStorage) Log(str string) {
+	// 如果要是readOnly的话就啥也不干了
 	if !fs.readOnly {
 		t := time.Now()
 		fs.mu.Lock()
 		defer fs.mu.Unlock()
+		// Opened file counter; if open < 0 means closed.
 		if fs.open < 0 {
 			return
 		}
+		// 往log里写数据
 		fs.doLog(t, str)
 	}
 }
 
+// TODO limingji 这个和上面的相比，没有判断锁相关的东西
 func (fs *fileStorage) log(str string) {
 	if !fs.readOnly {
 		fs.doLog(time.Now(), str)
@@ -512,6 +529,7 @@ func (fs *fileStorage) Create(fd FileDesc) (Writer, error) {
 	return &fileWrap{File: of, fs: fs, fd: fd}, nil
 }
 
+// 删除文件
 func (fs *fileStorage) Remove(fd FileDesc) error {
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
@@ -527,6 +545,7 @@ func (fs *fileStorage) Remove(fd FileDesc) error {
 	}
 	err := os.Remove(filepath.Join(fs.path, fsGenName(fd)))
 	if err != nil {
+		// 如果有老名字，并且根据新名字删除没有找到相应的文件
 		if fsHasOldName(fd) && os.IsNotExist(err) {
 			if e1 := os.Remove(filepath.Join(fs.path, fsGenOldName(fd))); !os.IsNotExist(e1) {
 				fs.log(fmt.Sprintf("remove %s: %v (old name)", fd, err))
@@ -539,6 +558,7 @@ func (fs *fileStorage) Remove(fd FileDesc) error {
 	return err
 }
 
+// 改名字
 func (fs *fileStorage) Rename(oldfd, newfd FileDesc) error {
 	if !FileDescOk(oldfd) || !FileDescOk(newfd) {
 		return ErrInvalidFile
@@ -565,6 +585,7 @@ func (fs *fileStorage) Close() error {
 		return ErrClosed
 	}
 	// Clear the finalizer.
+	// 这个还需要clear呢？不然的话下次gc的时候又搞一遍
 	runtime.SetFinalizer(fs, nil)
 
 	if fs.open > 0 {
@@ -614,6 +635,7 @@ func (fw *fileWrap) Close() error {
 	return err
 }
 
+// 不同的文件类型有不同的后缀
 func fsGenName(fd FileDesc) string {
 	switch fd.Type {
 	case TypeManifest:
@@ -629,6 +651,7 @@ func fsGenName(fd FileDesc) string {
 	}
 }
 
+// TODO limingji 这是历史问题吗？为啥有新旧两种文件后缀
 func fsHasOldName(fd FileDesc) bool {
 	return fd.Type == TypeTable
 }
@@ -641,8 +664,10 @@ func fsGenOldName(fd FileDesc) string {
 	return fsGenName(fd)
 }
 
+// 解析文件名
 func fsParseName(name string) (fd FileDesc, ok bool) {
 	var tail string
+	// C++的语法嘛这不是
 	_, err := fmt.Sscanf(name, "%d.%s", &fd.Num, &tail)
 	if err == nil {
 		switch tail {
@@ -657,6 +682,7 @@ func fsParseName(name string) (fd FileDesc, ok bool) {
 		}
 		return fd, true
 	}
+	// 清单文件
 	n, _ := fmt.Sscanf(name, "MANIFEST-%d%s", &fd.Num, &tail)
 	if n == 1 {
 		fd.Type = TypeManifest

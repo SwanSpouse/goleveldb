@@ -33,6 +33,7 @@ func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	} else {
 		flag = os.O_RDWR
 	}
+	// 创建一个文件
 	f, err := os.OpenFile(path, flag, 0)
 	if os.IsNotExist(err) {
 		f, err = os.OpenFile(path, flag|os.O_CREATE, 0644)
@@ -40,11 +41,15 @@ func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	if err != nil {
 		return
 	}
+	// 创建文件锁
+	// 这里会写入一些文件描述符，这样就保证了在进程终止或者文件句柄被释放的时候，文件锁可以被释放。
 	err = setFileLock(f, readOnly, true)
 	if err != nil {
 		f.Close()
 		return
 	}
+	// TODO limingji 这里为啥是unixFileLock呢？
+	// 你打开其他文件的时候ide会提示你说你打开的文件和系统不符
 	fl = &unixFileLock{f: f}
 	return
 }
@@ -59,8 +64,10 @@ func setFileLock(f *os.File, readOnly, lock bool) error {
 	how := syscall.LOCK_UN
 	if lock {
 		if readOnly {
+			// 只读当然是共享锁
 			how = syscall.LOCK_SH
 		} else {
+			// 如果要是往文件里写入，当然是排他锁
 			how = syscall.LOCK_EX
 		}
 	}

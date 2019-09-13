@@ -56,7 +56,9 @@ var invalidCases = []string{
 	"100.lop",
 }
 
+// 测试tempDir？
 func tempDir(t *testing.T) string {
+	// 系统提供的方法，搞一个临时目录
 	dir, err := ioutil.TempDir("", "goleveldb-")
 	if err != nil {
 		t.Fatal(t)
