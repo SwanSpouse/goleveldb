@@ -24,12 +24,14 @@ type IteratorSeeker interface {
 	// only contains one key/value pair then First and Last would moves
 	// to the same key/value pair.
 	// It returns whether such pair exist.
+	// 这个是挪到头指针
 	First() bool
 
 	// Last moves the iterator to the last key/value pair. If the iterator
 	// only contains one key/value pair then First and Last would moves
 	// to the same key/value pair.
 	// It returns whether such pair exist.
+	// 挪到为指针
 	Last() bool
 
 	// Seek moves the iterator to the first key/value pair whose key is greater
@@ -37,14 +39,17 @@ type IteratorSeeker interface {
 	// It returns whether such pair exist.
 	//
 	// It is safe to modify the contents of the argument after Seek returns.
+	// 挪到指定key
 	Seek(key []byte) bool
 
 	// Next moves the iterator to the next key/value pair.
 	// It returns false if the iterator is exhausted.
+	// 向后
 	Next() bool
 
 	// Prev moves the iterator to the previous key/value pair.
 	// It returns false if the iterator is exhausted.
+	// 向前
 	Prev() bool
 }
 
