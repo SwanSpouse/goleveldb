@@ -220,7 +220,10 @@ func (mw *memWriter) Close() error {
 	return nil
 }
 
+// 这个typeShift不好的点就是以后想加fd.Type的时候，加不了了，
+// 不然的话就有会问题
 func packFile(fd FileDesc) uint64 {
+	// 这里还要保证Num左移之后不会越界
 	return uint64(fd.Num)<<typeShift | uint64(fd.Type)
 }
 
