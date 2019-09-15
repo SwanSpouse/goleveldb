@@ -10,6 +10,7 @@ import (
 	"github.com/SwanSpouse/goleveldb/leveldb/util"
 )
 
+// 根据key生成hash值
 func bloomHash(key []byte) uint32 {
 	return util.Hash(key, 0xbc9f1d34)
 }
@@ -23,6 +24,7 @@ func (bloomFilter) Name() string {
 	return "leveldb.BuiltinBloomFilter"
 }
 
+// 判断过滤器中是否包含指定的key
 func (f bloomFilter) Contains(filter, key []byte) bool {
 	nBytes := len(filter) - 1
 	if nBytes < 1 {
