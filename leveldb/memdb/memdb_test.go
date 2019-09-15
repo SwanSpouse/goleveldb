@@ -68,8 +68,10 @@ func (p *DB) TestNewIterator(slice *util.Range) iterator.Iterator {
 
 var _ = testutil.Defer(func() {
 	Describe("Memdb", func() {
+		// 写测试
 		Describe("write test", func() {
 			It("should do write correctly", func() {
+				// 搞一个新的db
 				db := New(comparer.DefaultComparer, 0)
 				t := testutil.DBTesting{
 					DB:      db,
@@ -88,7 +90,7 @@ var _ = testutil.Defer(func() {
 				testutil.DoDBTesting(&t)
 			})
 		})
-
+		// 读测试
 		Describe("read test", func() {
 			testutil.AllKeyValueTesting(nil, func(kv testutil.KeyValue) testutil.DB {
 				// Building the DB.
