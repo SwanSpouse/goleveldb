@@ -195,7 +195,7 @@ type DB struct {
 	// [3]         : Height       // 当前节点的层高
 	// [3..height] : Next nodes   // 这个标识写的具有误导性啊，3..height，如果当前的高度是2呢？ 应该写成 3..3+height
 	nodeData  []int           // 跳跃表结构
-	prevNode  [tMaxHeight]int // TODO prevNode是各个层，比node大的节点都指向了node 这个问题脑袋有点儿乱了，明天看吧。
+	prevNode  [tMaxHeight]int // TODO(done) prevNode是各个层，比node大的节点都指向了node 这个问题脑袋有点儿乱了，明天看吧。// prev=true 会在遍历的过程中把target node所有层的的prev node都确定，存放在prev node中，方便后续的处理；
 	maxHeight int             // 当前跳跃表中的最高height
 	n         int             // db中key value对的数量
 	kvSize    int             // TODO(done) kvSize key value的size??? kvData里面有效key value的长度 <= len(kvData)
@@ -215,6 +215,7 @@ func (p *DB) randHeight() (h int) {
 // Must hold RW-lock if prev == true, as it use shared prevNode slice.
 // 找到 >= key的位置
 // 返回的是在跳跃表中的位置也就是offset对应的索引位置
+// prev=true 会在遍历的过程中把target node所有层的的prev node都确定，存放在prev node中，方便后续的处理；
 func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 	// node = 0 TODO(done) 是说从头开始找？跳跃表有个表头，从表头开始找
 	node := 0
@@ -349,9 +350,12 @@ func (p *DB) Put(key []byte, value []byte) error {
 
 	// 依次计算新节点的next和prev节点
 	// 根据上面算的prevNode，来计算node的next
+	// 这样就清晰了
 	for i, n := range p.prevNode[:h] {
 		m := n + nNext + i
+		// node的next指针指向prev.next节点
 		p.nodeData = append(p.nodeData, p.nodeData[m])
+		// prev.next指向node节点
 		p.nodeData[m] = node
 	}
 	// 统计有效kv数据长度
@@ -369,18 +373,21 @@ func (p *DB) Delete(key []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// 这里prev=true，删除操作当然需要找到node所有的prev node
 	node, exact := p.findGE(key, true)
 	if !exact {
 		return ErrNotFound
 	}
-
+	// 获取node的层高
 	h := p.nodeData[node+nHeight]
 	for i, n := range p.prevNode[:h] {
+		// 链表基本操作 将prev.next指向node.next 以达到删除node的目的；
 		m := n + nNext + i
 		p.nodeData[m] = p.nodeData[p.nodeData[m]+nNext+i]
 	}
-
+	// 重新计算kvSize
 	p.kvSize -= p.nodeData[node+nKey] + p.nodeData[node+nVal]
+	// 节点数-1
 	p.n--
 	return nil
 }
@@ -459,6 +466,7 @@ func (p *DB) NewIterator(slice *util.Range) iterator.Iterator {
 }
 
 // Capacity returns keys/values buffer capacity.
+// 获取kv.Data的cap
 func (p *DB) Capacity() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
