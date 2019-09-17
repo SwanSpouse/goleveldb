@@ -40,7 +40,7 @@ func (f bloomFilter) Contains(filter, key []byte) bool {
 		// Consider it a match.
 		return true
 	}
-
+	// key hash值
 	kh := bloomHash(key)
 	delta := (kh >> 17) | (kh << 15) // Rotate right 17 bits
 	for j := uint8(0); j < k; j++ {

@@ -11,6 +11,7 @@ import (
 )
 
 // Hash return hash of the given data.
+// 计算给定值的hash值
 func Hash(data []byte, seed uint32) uint32 {
 	// Similar to murmur hash
 	const (
